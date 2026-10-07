@@ -94,8 +94,30 @@ jobs:
 
 
   # ========================================
-  # STEP 4 — Build Docker Image
-  #          (only runs after steps 1, 2, 3 pass)
+  # STEP 4 — Secret scanning
+  # ========================================
+
+  secret-scan:
+    name: Secret Scan - Gitleaks
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository history for secrets
+        uses: gitleaks/gitleaks-action@v2
+
+
+  # ========================================
+  # STEP 5 — Build Docker Image
+  #          (only runs after tests and security scans pass)
   # ========================================
 
   docker-build:
@@ -104,6 +126,7 @@ jobs:
       - test
       - sast
       - sca
+      - secret-scan
     runs-on: ubuntu-latest
 
     steps:
@@ -117,7 +140,7 @@ jobs:
 
 
   # ========================================
-  # STEP 5 — Scan Docker Image for vulnerabilities
+  # STEP 6 — Scan Docker Image for vulnerabilities
   # ========================================
 
   image-scan:
@@ -146,17 +169,18 @@ jobs:
 
       - name: Scan image
         run: |
-          trivy image --severity HIGH,CRITICAL session17-python:${{ github.sha }}
+          trivy image --exit-code 1 --severity HIGH,CRITICAL session17-python:${{ github.sha }}
 
 
   # ========================================
-  # STEP 6 — Push image to Docker Hub
+  # STEP 7 — Push image to Docker Hub
   # ========================================
 
   push:
     name: Push Image to Docker Hub
     needs:
       - image-scan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -167,24 +191,24 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: nensiravaliya28
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and tag image
         run: |
           docker build \
-            -t nensiravaliya28/hey-cicd:${{ github.sha }} \
-            -t nensiravaliya28/hey-cicd:latest \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/hey-cicd:${{ github.sha }} \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/hey-cicd:latest \
             .
 
       - name: Push image
         run: |
-          docker push nensiravaliya28/hey-cicd:${{ github.sha }}
-          docker push nensiravaliya28/hey-cicd:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/hey-cicd:${{ github.sha }}
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/hey-cicd:latest
 
 
   # ========================================
-  # STEP 7 — Deploy to Kubernetes
+  # STEP 8 — Deploy to Kubernetes
   #          (only runs on push to main)
   # ========================================
 
@@ -205,14 +229,11 @@ jobs:
       - name: Create k8s Kind Cluster (For testing deployment)
         uses: helm/kind-action@v1.10.0
 
-      - name: Update deployment with new image tag
-        run: |
-          # Replace '__IMAGE_TAG__' placeholder with the specific git sha we just pushed
-          sed -i "s|__IMAGE_TAG__|${{ github.sha }}|g" k8s/deployment.yaml
-
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -f k8s/deployment.yaml
+          kubectl set image deployment/session17-python \
+            session17-python=${{ secrets.DOCKERHUB_USERNAME }}/hey-cicd:${{ github.sha }}
           kubectl apply -f k8s/service.yaml
 
       - name: Check rollout status

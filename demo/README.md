@@ -1,301 +1,258 @@
-# ⚡ hey-cicd — DevSecOps Dashboard
+# Session 17: DevSecOps CI/CD Demo
 
-## 📁 Project Structure
+This Flask demo runs unit tests and security checks in GitHub Actions, builds and scans a Docker image, pushes it to Docker Hub, and verifies deployment to a temporary Kubernetes Kind cluster.
 
-```
-hey-cicd/
-├── app/
-│   ├── app.py              # Flask application
-│   ├── templates/
-│   │   └── index.html      # Dashboard UI
-│   └── static/
-│       ├── css/styles.css
-│       └── js/main.js
-├── tests/
-│   └── test_app.py         # Unit tests
-├── k8s/
-│   ├── deployment.yaml     # Kubernetes Deployment
-│   └── service.yaml        # Kubernetes Service
-├── .github/
-│   └── workflows/
-│       └── devsecops.yml   # CI/CD Pipeline
-├── Dockerfile
-├── requirements.txt
-├── requirements-dev.txt
-└── README.md
-```
+## Project Contents
 
----
+- `app/`: Flask application, templates, and static assets.
+- `tests/`: pytest unit tests.
+- `Dockerfile`: application image build.
+- `.github/workflows/devsecops.yml`: CI/CD and security pipeline.
+- `k8s/`: Kubernetes Deployment and Service manifests.
+- `requirements.txt`, `requirements-dev.txt`: runtime and test dependencies.
 
-## 🌐 API Endpoints
+## Prerequisites
 
-| Method | Route | Description |
-|--------|-------|-------------|
-| `GET` | `/` | Dashboard UI |
-| `GET` | `/health` | Health check |
-| `GET` | `/api/status` | App info, uptime, Python version |
-| `GET` | `/api/greet/<name>` | Returns a greeting for the name |
-| `POST` | `/api/add` | Adds two numbers |
-| `POST` | `/api/calculate` | Calculator (add/subtract/multiply/divide/power/modulo) |
-| `POST` | `/api/pipeline/run` | Simulates a CI/CD pipeline run |
+- Python 3.12 and pip.
+- Docker Engine/Desktop, running.
+- Git and a GitHub repository.
+- Docker Hub account and access token for publishing images.
+- For manual deployment: `kubectl` and a running Kubernetes cluster such as Minikube.
+- Optional local scanners: Gitleaks, pip-audit, and Trivy. CodeQL runs in GitHub Actions.
+- Optional GitHub CLI (`gh`) for configuring repository secrets and viewing runs.
 
----
+## Run Commands From This Project
 
-## 🖥️ Method 1 — Run Manually (Python)
-
-### Step 1 — Clone the repository
+Open a terminal at the workspace's `session17` folder and enter the project directory:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/hey-cicd.git
-cd hey-cicd
+cd session17_25sept/demo
 ```
 
-### Step 2 — Create a virtual environment
+If your terminal starts elsewhere, use the full path to this directory.
+
+### 1. Install and Run the Application
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate        # Mac/Linux
-# .venv\Scripts\activate         # Windows
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r requirements-dev.txt
+python app/app.py
 ```
 
-### Step 3 — Install dependencies
+Open `http://localhost:5001`. In another terminal, check the health endpoint:
 
 ```bash
-pip install -r requirements.txt
+curl --fail http://localhost:5001/health
+curl --fail http://localhost:5001/api/status
 ```
 
-### Step 4 — Run the app
+### 2. Run Unit Tests
 
 ```bash
-python3 app/app.py
+python -m pytest --cov=app --cov-report=term-missing
 ```
 
-### Step 5 — Open in browser
+The command exits non-zero if tests fail. The current suite contains eight tests.
 
-```
-http://localhost:5001
-```
+### 3. Run Dependency Scanning (SCA)
 
-### Step 6 — Run the tests
+Install pip-audit into the active virtual environment and scan the pinned runtime dependencies:
 
 ```bash
-pip install -r requirements-dev.txt
-python3 -m pytest --cov=app --cov-report=term-missing
+python -m pip install pip-audit
+pip-audit -r requirements.txt
 ```
 
-**Expected output:**
-```
-tests/test_app.py::test_home                      PASSED
-tests/test_app.py::test_health                    PASSED
-tests/test_app.py::test_greet                     PASSED
-tests/test_app.py::test_add_numbers               PASSED
-tests/test_app.py::test_add_numbers_missing_fields PASSED
-tests/test_app.py::test_calculator_multiply       PASSED
-tests/test_app.py::test_calculator_divide_by_zero PASSED
-tests/test_app.py::test_status                    PASSED
-8 passed in 0.Xs
-```
+An audit finding causes a non-zero exit; resolve or explicitly assess findings before publishing.
 
-### Test the API manually
+### 4. Run Secret Scanning
+
+Install Gitleaks using its official installation instructions, then scan the repository and its Git history:
 
 ```bash
-# Health check
-curl http://localhost:5001/health
-
-# Greet someone
-curl http://localhost:5001/api/greet/Nensi
-
-# Add two numbers
-curl -X POST http://localhost:5001/api/add \
-  -H "Content-Type: application/json" \
-  -d '{"number1": 10, "number2": 20}'
-
-# Calculator
-curl -X POST http://localhost:5001/api/calculate \
-  -H "Content-Type: application/json" \
-  -d '{"a": 6, "b": 3, "operation": "multiply"}'
+gitleaks git . --redact --verbose
 ```
 
----
+Do not commit real credentials. If a credential was committed, revoke or rotate it even after removing it from the latest file version.
 
-## 🐳 Method 2 — Run with Docker
-
-### Prerequisites
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
-
-### Step 1 — Build the Docker image
+### 5. Build and Run the Docker Image
 
 ```bash
-docker build -t hey-cicd:latest .
+docker build -t session17-python:local .
+docker run --rm --name session17-python -p 5001:5001 session17-python:local
 ```
 
-### Step 2 — Run the container
+In another terminal, verify the container responds, then stop it with `Ctrl+C` in the run terminal:
 
 ```bash
-docker run -p 5001:5001 hey-cicd:latest
+curl --fail http://localhost:5001/health
 ```
 
-### Step 3 — Open in browser
+### 6. Scan the Container Image
 
-```
-http://localhost:5001
-```
-
-### Useful Docker commands
+Install Trivy using the official Aqua Security installation instructions, then run the same blocking gate as CI:
 
 ```bash
-# See running containers
-docker ps
-
-# Stop the container
-docker stop <container-id>
-
-# Remove the image
-docker rmi hey-cicd:latest
-
-# Run in background (detached mode)
-docker run -d -p 5001:5001 hey-cicd:latest
+trivy image --exit-code 1 --severity HIGH,CRITICAL session17-python:local
 ```
 
----
+The command fails when HIGH or CRITICAL vulnerabilities are found. Review scan results and update the base image or dependencies before retrying.
 
-## ⚙️ Method 3 — CI/CD Pipeline (GitHub Actions)
+## GitHub Actions CI/CD
 
-The pipeline runs automatically every time you push code to `main` or open a pull request.
+The workflow runs for pull requests targeting `main` and pushes to `main`. Test and security jobs run as independent gates. Docker build and image scanning wait for those checks to pass. Publishing and Kubernetes deployment run only for a push to `main`.
 
-### Pipeline Stages
-
-```
-Push to GitHub
-      │
-      ▼
-┌─────────────────┐
-│  STEP 1: Tests  │  pytest — runs all 8 unit tests
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  STEP 2: SAST   │  CodeQL — scans code for security issues
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   STEP 3: SCA   │  pip-audit — checks for vulnerable packages
-└────────┬────────┘
-         │ (all 3 must pass)
-┌────────▼────────┐
-│  STEP 4: Build  │  docker build — creates the Docker image
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  STEP 5: Scan   │  Trivy — scans the Docker image for CVEs
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│  STEP 6: Push   │  Pushes image to GitHub Container Registry
-└────────┬────────┘
-         │ (only on push to main)
-┌────────▼────────┐
-│ STEP 7: Deploy  │  kubectl apply → deploys to Kubernetes
-└─────────────────┘
+```text
+Code -> Unit tests + CodeQL SAST + pip-audit SCA + Gitleaks
+     -> Docker build -> Trivy HIGH/CRITICAL gate
+     -> Push to Docker Hub -> Deploy and smoke-test in Kind
 ```
 
-### How to trigger the pipeline
+### Configure Docker Hub Secrets
+
+In GitHub, open **Settings -> Secrets and variables -> Actions -> New repository secret** and add:
+
+| Secret | Value |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Your Docker Hub username |
+| `DOCKERHUB_TOKEN` | A Docker Hub access token with permission to push the `hey-cicd` repository |
+
+`GITHUB_TOKEN` is provided automatically by GitHub Actions. The workflow does not use a `KUBECONFIG` secret: it creates a temporary Kind cluster inside the runner to validate the deployment. This cluster is deleted when the job ends; it is not a persistent production cluster.
+
+Alternatively, with GitHub CLI installed and authenticated, set the secrets from the project terminal. The token is read without echo and is not placed directly in shell history:
 
 ```bash
-# Make a change, commit, and push
-git add .
-git commit -m "your message"
+gh auth login
+read -rp "Docker Hub username: " DOCKERHUB_USERNAME
+gh secret set DOCKERHUB_USERNAME --body "$DOCKERHUB_USERNAME"
+read -rsp "Docker Hub access token: " DOCKERHUB_TOKEN
+printf '\n'
+printf '%s' "$DOCKERHUB_TOKEN" | gh secret set DOCKERHUB_TOKEN
+unset DOCKERHUB_TOKEN
+```
+
+### Commit and Trigger the Workflow
+
+Check the remote and current changes before staging. Add only the files intended for this task; avoid `git add .` if the working tree contains unrelated files.
+
+```bash
+git remote -v
+git status --short
+git add README.md .github/workflows/devsecops.yml
+git commit -m "Complete DevSecOps pipeline documentation and gates"
 git push origin main
 ```
 
-Then go to your GitHub repo → **Actions** tab to watch it run.
-
-### Required GitHub Secrets
-
-Go to **GitHub repo → Settings → Secrets and variables → Actions** and add:
-
-| Secret Name | Value |
-|-------------|-------|
-| `KUBECONFIG` | Contents of your `~/.kube/config` file (needed for Step 7 deploy) |
-
-> ℹ️ `GITHUB_TOKEN` is automatically provided by GitHub — you don't need to add it manually.
-
-### View your Docker image after push
-
-After Step 6 runs, your image is available at:
-```
-ghcr.io/YOUR_USERNAME/hey-cicd:latest
-```
-
-Go to **GitHub repo → Packages** to see it.
-
----
-
-## ☸️ Method 4 — Deploy to Kubernetes manually
-
-> Do this if you want to deploy without the pipeline, directly from your terminal.
-
-### Prerequisites
-- A running Kubernetes cluster (minikube, k3s, or cloud)
-- `kubectl` installed and connected to your cluster
-
-### Step 1 — Apply the manifests
+For a pull request, create and push a feature branch, then open a PR targeting `main`:
 
 ```bash
+git switch -c devsecops-demo
+git push -u origin devsecops-demo
+```
+
+Open the repository's **Actions** tab to inspect each job. A push to `main` should show successful tests, SAST, SCA, secret scan, Docker build, image scan, image push, and Kind deployment/smoke test. The image tags pushed to Docker Hub are the commit SHA and `latest`.
+
+With GitHub CLI, inspect recent runs and logs:
+
+```bash
+gh run list --workflow devsecops.yml
+gh run view RUN_ID --log
+gh run view RUN_ID --web
+```
+
+Replace `RUN_ID` with the ID shown by `gh run list`.
+
+## Deploy to Your Own Kubernetes Cluster
+
+The workflow's Kind cluster is temporary. These commands deploy to the cluster selected by your local `kubectl` context. First publish an image to Docker Hub or use an existing accessible image. For a local push, authenticate without putting the token in command history:
+
+```bash
+read -rp "Docker Hub username: " DOCKERHUB_USERNAME
+read -rsp "Docker Hub access token: " DOCKERHUB_TOKEN
+printf '\n'
+printf '%s' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+IMAGE="$DOCKERHUB_USERNAME/hey-cicd:$(git rev-parse --short HEAD)"
+docker build -t "$IMAGE" .
+docker push "$IMAGE"
+unset DOCKERHUB_TOKEN
+```
+
+Apply the manifests, point the Deployment at the image just pushed, and wait for the rollout:
+
+```bash
+kubectl config current-context
 kubectl apply -f k8s/deployment.yaml
+kubectl set image deployment/session17-python "session17-python=$IMAGE"
 kubectl apply -f k8s/service.yaml
+kubectl rollout status deployment/session17-python --timeout=120s
+kubectl get deployments,pods,services
 ```
 
-### Step 2 — Check the pods are running
+Access the app through a local port-forward. Keep this command running and use another terminal for the curl checks:
 
 ```bash
-kubectl get pods
-kubectl get service session17-python
+kubectl port-forward service/session17-python 5001:80
 ```
 
-### Step 3 — Access the app
+```bash
+curl --fail http://localhost:5001/health
+curl --fail http://localhost:5001/api/status
+```
+
+For Minikube, the NodePort service can also be opened with:
 
 ```bash
-# If using minikube
 minikube service session17-python
-
-# Or access via NodePort
-http://<your-node-ip>:30001
 ```
 
-### Useful kubectl commands
+Useful troubleshooting commands:
 
 ```bash
-# See all running pods
-kubectl get pods
-
-# See logs from a pod
-kubectl logs <pod-name>
-
-# Delete the deployment
-kubectl delete -f k8s/deployment.yaml
-kubectl delete -f k8s/service.yaml
+kubectl describe deployment session17-python
+kubectl get pods -l app=session17-python
+kubectl logs deployment/session17-python
+kubectl get events --sort-by=.metadata.creationTimestamp
 ```
 
----
+Remove the manually deployed resources when you no longer need them:
 
-## 🧪 DevSecOps Concepts Covered
+```bash
+kubectl delete -f k8s/service.yaml
+kubectl delete -f k8s/deployment.yaml
+```
 
-| Concept | Tool Used | Where |
-|---------|-----------|-------|
-| **Unit Testing** | pytest + pytest-cov | `tests/test_app.py` |
-| **SAST** (Static Application Security Testing) | GitHub CodeQL | Pipeline Step 2 |
-| **SCA** (Software Composition Analysis) | pip-audit | Pipeline Step 3 |
-| **Containerisation** | Docker | `Dockerfile` |
-| **Container Image Scanning** | Trivy | Pipeline Step 5 |
-| **Container Registry** | GitHub Container Registry (GHCR) | Pipeline Step 6 |
-| **Orchestration** | Kubernetes | `k8s/` folder |
-| **CI/CD Automation** | GitHub Actions | `.github/workflows/devsecops.yml` |
+## Evidence and Screenshots
 
----
+Capture real results after the workflow has completed; do not use expected output as proof of a successful run.
 
-## 👩‍💻 Built With
+1. In GitHub **Actions**, capture the completed run with all required jobs green.
+2. Open the run and capture the test summary and security/image scan job results.
+3. In Docker Hub, capture the `hey-cicd` repository showing the commit-SHA image tag.
+4. For manual Kubernetes deployment, capture `kubectl get deployments,pods,services` and the successful `/health` response.
+5. Keep screenshots in the submission's requested evidence location and avoid including access tokens or other secrets.
 
-- **Python 3.12** + **Flask 3.x**
-- **Docker**
-- **Kubernetes**
-- **GitHub Actions**
+## API Endpoints
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/` | Dashboard |
+| `GET` | `/health` | Health check |
+| `GET` | `/api/status` | Application status, uptime, and Python version |
+| `GET` | `/api/greet/<name>` | Greeting endpoint |
+| `POST` | `/api/add` | Add two numbers |
+| `POST` | `/api/calculate` | Calculator operations |
+| `POST` | `/api/pipeline/run` | Simulated pipeline endpoint |
+
+## Security Tools
+
+| Control | Tool | Enforcement |
+| --- | --- | --- |
+| Unit tests | pytest, pytest-cov | Failed tests block image build |
+| SAST | GitHub CodeQL | Analysis job must pass |
+| SCA | pip-audit | Audit job must pass |
+| Secret scanning | Gitleaks GitHub Action | Detected secrets fail the scan job |
+| Image scanning | Trivy | HIGH/CRITICAL findings return exit code 1 |
+| Registry | Docker Hub | Push occurs only after build and scan pass |
+| Kubernetes | Kind in CI; local cluster manually | CI verifies rollout and HTTP endpoints |
