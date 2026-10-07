@@ -7,7 +7,7 @@ This Flask demo runs unit tests and security checks in GitHub Actions, builds an
 - `app/`: Flask application, templates, and static assets.
 - `tests/`: pytest unit tests.
 - `Dockerfile`: application image build.
-- `.github/workflows/devsecops.yml`: CI/CD and security pipeline.
+- `../.github/workflows/devsecops.yml`: CI/CD and security pipeline (stored at the Git repository root for GitHub Actions discovery).
 - `k8s/`: Kubernetes Deployment and Service manifests.
 - `requirements.txt`, `requirements-dev.txt`: runtime and test dependencies.
 
@@ -140,7 +140,7 @@ Check the remote and current changes before staging. Add only the files intended
 ```bash
 git remote -v
 git status --short
-git add README.md .github/workflows/devsecops.yml
+git add README.md .github/workflows/devsecops.yml ../.github/workflows/devsecops.yml
 git commit -m "Complete DevSecOps pipeline documentation and gates"
 git push origin main
 ```
